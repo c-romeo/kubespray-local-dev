@@ -158,12 +158,18 @@ install-docker:
 	@echo "==================== \033[1mINSTALL-DOCKER\033[0m ===================="
 	@if [ -f "scripts/install-docker-debian-trixie.sh" ]; then \
 		echo "\033[1;32mRunning Docker installation script...\033[0m"; \
+		if [ "$(USER_INTERACTIVE)" = "1" ]; then \
+			echo "\033[1;33mInteractive mode enabled. Root password prompts will be visible.\033[0m"; \
+		fi; \
 		chmod +x scripts/install-docker-debian-trixie.sh; \
-		./scripts/install-docker-debian-trixie.sh; \
+		USER_INTERACTIVE=$(USER_INTERACTIVE) ./scripts/install-docker-debian-trixie.sh; \
 		echo "Docker installation script completed."; \
 	else \
 		echo "\033[1;31mError: scripts/install-docker-debian-trixie.sh not found.\033[0m"; \
 		echo "Please ensure the script exists in the scripts/ directory."; \
+		if [ "$(USER_INTERACTIVE)" != "1" ]; then \
+			echo "Tip: If you need interactive root prompts, use: make install-docker USER_INTERACTIVE=1"; \
+		fi; \
 		exit 1; \
 	fi
 
@@ -182,4 +188,5 @@ help:
 	@echo "  fetch-origin          - Fetch latest changes from origin remote"
 	@echo "  checkout-branch       - Checkout branch by name (use BRANCH=name or defaults to master)"
 	@echo "  install-docker        - Install Docker using scripts/install-docker-debian-trixie.sh"
+	@echo "                          Use USER_INTERACTIVE=1 for interactive root prompts"
 	@echo "  help                  - Show this help message"

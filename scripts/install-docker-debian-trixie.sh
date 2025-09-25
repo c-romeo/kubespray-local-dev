@@ -47,15 +47,21 @@ check_sudo_privileges() {
         log_warn "User does not appear to have sudo privileges."
         log_warn "Checking if root password access is available..."
         
-        # For non-interactive environments (like make), we need to handle this differently
+        # For non-interactive environments (like make), check USER_INTERACTIVE variable
         if [[ ! -t 0 ]] || [[ -n "${MAKE_RESTARTS:-}" ]] || [[ -n "${MAKELEVEL:-}" ]]; then
-            log_error "Script is running in non-interactive mode (possibly from make)."
-            log_error "Root password prompts may not work properly."
-            log_error "Please run this script directly or ensure user has sudo privileges:"
-            log_error "  sudo usermod -aG sudo $USER"
-            log_error "Then log out and log back in, or run:"
-            log_error "  ./scripts/install-docker-debian-trixie.sh"
-            exit 1
+            if [[ "${USER_INTERACTIVE:-0}" != "1" ]]; then
+                log_error "Script is running in non-interactive mode (possibly from make)."
+                log_error "Root password prompts may not work properly."
+                log_error "To enable interactive mode from make, set USER_INTERACTIVE=1:"
+                log_error "  make install-docker USER_INTERACTIVE=1"
+                log_error "Or run this script directly:"
+                log_error "  ./scripts/install-docker-debian-trixie.sh"
+                log_error "Or ensure user has sudo privileges:"
+                log_error "  sudo usermod -aG sudo $USER"
+                exit 1
+            else
+                log_info "USER_INTERACTIVE=1 detected. Enabling interactive root prompts from make."
+            fi
         fi
         
         log_warn "Will attempt to use 'su -c' for root operations."
@@ -125,7 +131,14 @@ run_as_root() {
             echo "Root privileges required for: $*"
             echo "Please enter root password:"
         fi
-        su -c "$*" </dev/tty
+        # Force password prompt to be visible by using /dev/tty
+        if [[ "${USER_INTERACTIVE:-0}" == "1" ]] && ([[ ! -t 0 ]] || [[ -n "${MAKELEVEL:-}" ]]); then
+            # When USER_INTERACTIVE=1 and running from make, ensure tty interaction
+            exec < /dev/tty
+            su -c "$*"
+        else
+            su -c "$*" </dev/tty
+        fi
     else
         $SUDO_CMD "$@"
     fi
@@ -157,7 +170,12 @@ add_docker_gpg_key() {
             echo "Root privileges required for: adding Docker GPG key"
             echo "Please enter root password:"
         fi
-        curl -fsSL https://download.docker.com/linux/debian/gpg | su -c "gpg --dearmor -o /etc/apt/keyrings/docker.gpg" </dev/tty
+        if [[ "${USER_INTERACTIVE:-0}" == "1" ]] && ([[ ! -t 0 ]] || [[ -n "${MAKELEVEL:-}" ]]); then
+            exec < /dev/tty
+            curl -fsSL https://download.docker.com/linux/debian/gpg | su -c "gpg --dearmor -o /etc/apt/keyrings/docker.gpg"
+        else
+            curl -fsSL https://download.docker.com/linux/debian/gpg | su -c "gpg --dearmor -o /etc/apt/keyrings/docker.gpg" </dev/tty
+        fi
         run_as_root chmod a+r /etc/apt/keyrings/docker.gpg
     else
         curl -fsSL https://download.docker.com/linux/debian/gpg | $SUDO_CMD gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -175,7 +193,12 @@ add_docker_repository() {
             echo "Root privileges required for: adding Docker repository"
             echo "Please enter root password:"
         fi
-        echo "$repo_line" | su -c "tee /etc/apt/sources.list.d/docker.list > /dev/null" </dev/tty
+        if [[ "${USER_INTERACTIVE:-0}" == "1" ]] && ([[ ! -t 0 ]] || [[ -n "${MAKELEVEL:-}" ]]); then
+            exec < /dev/tty
+            echo "$repo_line" | su -c "tee /etc/apt/sources.list.d/docker.list > /dev/null"
+        else
+            echo "$repo_line" | su -c "tee /etc/apt/sources.list.d/docker.list > /dev/null" </dev/tty
+        fi
     else
         echo "$repo_line" | $SUDO_CMD tee /etc/apt/sources.list.d/docker.list > /dev/null
     fi

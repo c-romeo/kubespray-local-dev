@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+# Enable debug mode if DEBUG environment variable is set
+if [ "${DEBUG:-}" = "1" ]; then
+    set -x
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -30,6 +35,14 @@ print_error() {
 if ! command -v bws &> /dev/null; then
     print_error "Bitwarden Secrets CLI (bws) is not installed or not in PATH"
     print_error "Please install bws from: https://bitwarden.com/help/secrets-manager-cli/"
+    exit 1
+fi
+
+# Check if BWS_ACCESS_TOKEN environment variable is set
+if [ -z "${BWS_ACCESS_TOKEN:-}" ]; then
+    print_error "BWS_ACCESS_TOKEN environment variable is not set"
+    print_error "Please set your Bitwarden Secrets Manager access token:"
+    print_error "  export BWS_ACCESS_TOKEN='your-access-token-here'"
     exit 1
 fi
 
@@ -67,25 +80,71 @@ fi
 # Get Docker registry and credentials from Bitwarden Secrets
 print_status "Retrieving Docker registry credentials from Bitwarden Secrets..."
 
+# Function to get secret value with better error handling
+get_secret_value() {
+    local secret_id="$1"
+    local secret_name="$2"
+    
+    # Get the raw output from bws (redirect stderr to avoid contamination)
+    local raw_output
+    if ! raw_output=$(bws secret get "$secret_id" 2>/dev/null); then
+        # If it fails, try again with stderr to show error
+        local error_output
+        error_output=$(bws secret get "$secret_id" 2>&1)
+        print_error "Failed to execute bws command for $secret_name" >&2
+        print_error "Output: $error_output" >&2
+        return 1
+    fi
+    
+    # Try different parsing methods
+    local value
+    # Method 1: Try jq if available
+    if command -v jq &> /dev/null; then
+        value=$(echo "$raw_output" | jq -r '.value' 2>/dev/null)
+    fi
+    
+    # Method 2: Fallback to grep/cut
+    if [ -z "$value" ] || [ "$value" = "null" ]; then
+        value=$(echo "$raw_output" | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
+    fi
+    
+    # Method 3: Try alternative JSON parsing
+    if [ -z "$value" ]; then
+        value=$(echo "$raw_output" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
+    fi
+    
+    if [ -z "$value" ]; then
+        print_error "Failed to parse value from BWS output for $secret_name" >&2
+        print_error "Raw output: $raw_output" >&2
+        return 1
+    fi
+    
+    # Return only the clean value
+    echo "$value"
+}
+
 # Get registry URL
-DOCKER_REGISTRY=$(bws secret get c8ce7ef5-ee0f-4b99-9120-b36301621aef | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
-if [ -z "$DOCKER_REGISTRY" ]; then
+print_status "Getting Docker registry URL..."
+DOCKER_REGISTRY=$(get_secret_value "c8ce7ef5-ee0f-4b99-9120-b36301621aef" "DOCKER_REGISTRY")
+if [ $? -ne 0 ] || [ -z "$DOCKER_REGISTRY" ]; then
     print_error "Failed to retrieve DOCKER_REGISTRY from Bitwarden Secrets"
     exit 1
 fi
 print_success "Retrieved Docker registry: $DOCKER_REGISTRY"
 
 # Get registry username
-DOCKER_USERNAME=$(bws secret get 75267518-609b-4bbc-903a-b3420025b283 | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
-if [ -z "$DOCKER_USERNAME" ]; then
+print_status "Getting Docker registry username..."
+DOCKER_USERNAME=$(get_secret_value "75267518-609b-4bbc-903a-b3420025b283" "DOCKER_USERNAME")
+if [ $? -ne 0 ] || [ -z "$DOCKER_USERNAME" ]; then
     print_error "Failed to retrieve DOCKER_USERNAME from Bitwarden Secrets"
     exit 1
 fi
 print_success "Retrieved Docker username: $DOCKER_USERNAME"
 
 # Get registry password
-DOCKER_PASSWORD=$(bws secret get 19059bc7-077a-4e58-b314-b34200271b46 | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
-if [ -z "$DOCKER_PASSWORD" ]; then
+print_status "Getting Docker registry password..."
+DOCKER_PASSWORD=$(get_secret_value "19059bc7-077a-4e58-b314-b34200271b46" "DOCKER_PASSWORD")
+if [ $? -ne 0 ] || [ -z "$DOCKER_PASSWORD" ]; then
     print_error "Failed to retrieve DOCKER_PASSWORD from Bitwarden Secrets"
     exit 1
 fi
@@ -94,9 +153,12 @@ print_success "Retrieved Docker password: [HIDDEN]"
 # Generate image name and tags
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+# Sanitize branch name for Docker tag (replace invalid characters with dashes)
+GIT_BRANCH_CLEAN=$(echo "$GIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
 IMAGE_NAME="kubespray"
 BASE_TAG="${DOCKER_REGISTRY}/${IMAGE_NAME}"
-VERSIONED_TAG="${BASE_TAG}:${TIMESTAMP}-${GIT_COMMIT}"
+VERSIONED_TAG="${BASE_TAG}:${TIMESTAMP}-${GIT_BRANCH_CLEAN}-${GIT_COMMIT}"
 LATEST_TAG="${BASE_TAG}:latest"
 
 print_status "Building Docker image..."
@@ -159,4 +221,5 @@ print_success "Images pushed:"
 print_success "  - $VERSIONED_TAG"
 print_success "  - $LATEST_TAG"
 print_success "Build timestamp: $TIMESTAMP"
+print_success "Git branch: $GIT_BRANCH"
 print_success "Git commit: $GIT_COMMIT"

@@ -8,7 +8,7 @@ endif
 .PHONY: clone-kubespray clean list-remotes add-upstream list-origin-branches list-upstream-branches list-local-branches fetch-upstream fetch-origin checkout-branch help
 
 # Default target
-all: clone-kubespray add-upstream list-remotes fetch-origin list-origin-branches fetch-upstream list-upstream-branches list-local-branches
+all: clone-kubespray add-upstream list-remotes fetch-origin list-origin-branches fetch-upstream list-upstream-branches list-local-branches checkout-branch
 
 # Clone kubespray repository if kubespray-fork folder doesn't exist
 clone-kubespray:

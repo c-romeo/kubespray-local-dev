@@ -5,7 +5,7 @@ ifneq (,$(wildcard .env))
     export
 endif
 
-.PHONY: clone-kubespray clean list-remotes add-upstream list-origin-branches list-upstream-branches list-local-branches fetch-upstream fetch-origin checkout-branch help
+.PHONY: clone-kubespray clean list-remotes add-upstream list-origin-branches list-upstream-branches list-local-branches fetch-upstream fetch-origin checkout-branch install-docker help
 
 # Default target
 all: clone-kubespray add-upstream list-remotes fetch-origin list-origin-branches fetch-upstream list-upstream-branches list-local-branches checkout-branch
@@ -153,6 +153,20 @@ checkout-branch:
 		echo "kubespray-fork directory does not exist. Run 'make clone-kubespray' first."; \
 	fi
 
+# Install Docker using the Debian Trixie installation script
+install-docker:
+	@echo "==================== \033[1mINSTALL-DOCKER\033[0m ===================="
+	@if [ -f "scripts/install-docker-debian-trixie.sh" ]; then \
+		echo "\033[1;32mRunning Docker installation script...\033[0m"; \
+		chmod +x scripts/install-docker-debian-trixie.sh; \
+		./scripts/install-docker-debian-trixie.sh; \
+		echo "Docker installation script completed."; \
+	else \
+		echo "\033[1;31mError: scripts/install-docker-debian-trixie.sh not found.\033[0m"; \
+		echo "Please ensure the script exists in the scripts/ directory."; \
+		exit 1; \
+	fi
+
 # Help target
 help:
 	@echo "==================== \033[1mHELP\033[0m ===================="
@@ -167,4 +181,5 @@ help:
 	@echo "  fetch-upstream        - Fetch latest changes from upstream remote"
 	@echo "  fetch-origin          - Fetch latest changes from origin remote"
 	@echo "  checkout-branch       - Checkout branch by name (use BRANCH=name or defaults to master)"
+	@echo "  install-docker        - Install Docker using scripts/install-docker-debian-trixie.sh"
 	@echo "  help                  - Show this help message"

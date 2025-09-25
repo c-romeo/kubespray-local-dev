@@ -68,7 +68,7 @@ fi
 print_status "Retrieving Docker registry credentials from Bitwarden Secrets..."
 
 # Get registry URL
-DOCKER_REGISTRY=$(bws secret get DOCKER_REGISTRY | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
+DOCKER_REGISTRY=$(bws secret get c8ce7ef5-ee0f-4b99-9120-b36301621aef | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
 if [ -z "$DOCKER_REGISTRY" ]; then
     print_error "Failed to retrieve DOCKER_REGISTRY from Bitwarden Secrets"
     exit 1
@@ -76,7 +76,7 @@ fi
 print_success "Retrieved Docker registry: $DOCKER_REGISTRY"
 
 # Get registry username
-DOCKER_USERNAME=$(bws secret get DOCKER_USERNAME | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
+DOCKER_USERNAME=$(bws secret get 75267518-609b-4bbc-903a-b3420025b283 | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
 if [ -z "$DOCKER_USERNAME" ]; then
     print_error "Failed to retrieve DOCKER_USERNAME from Bitwarden Secrets"
     exit 1
@@ -84,7 +84,7 @@ fi
 print_success "Retrieved Docker username: $DOCKER_USERNAME"
 
 # Get registry password
-DOCKER_PASSWORD=$(bws secret get DOCKER_PASSWORD | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
+DOCKER_PASSWORD=$(bws secret get 19059bc7-077a-4e58-b314-b34200271b46 | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
 if [ -z "$DOCKER_PASSWORD" ]; then
     print_error "Failed to retrieve DOCKER_PASSWORD from Bitwarden Secrets"
     exit 1

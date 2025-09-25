@@ -5,7 +5,7 @@ ifneq (,$(wildcard .env))
     export
 endif
 
-.PHONY: clone-kubespray clean list-remotes add-upstream list-origin-branches list-upstream-branches list-local-branches fetch-upstream fetch-origin checkout-branch install-docker help
+.PHONY: clone-kubespray clean list-remotes add-upstream list-origin-branches list-upstream-branches list-local-branches fetch-upstream fetch-origin checkout-branch install-docker build-and-push-docker help
 
 # Default target
 all: clone-kubespray add-upstream list-remotes fetch-origin list-origin-branches fetch-upstream list-upstream-branches list-local-branches checkout-branch
@@ -173,6 +173,20 @@ install-docker:
 		exit 1; \
 	fi
 
+# Build and push Docker image using the build script
+build-and-push-docker:
+	@echo "==================== \033[1mBUILD-AND-PUSH-DOCKER\033[0m ===================="
+	@if [ -f "scripts/build-and-push-docker.sh" ]; then \
+		echo "\033[1;32mRunning Docker build and push script...\033[0m"; \
+		chmod +x scripts/build-and-push-docker.sh; \
+		./scripts/build-and-push-docker.sh; \
+		echo "Docker build and push script completed."; \
+	else \
+		echo "\033[1;31mError: scripts/build-and-push-docker.sh not found.\033[0m"; \
+		echo "Please ensure the script exists in the scripts/ directory."; \
+		exit 1; \
+	fi
+
 # Help target
 help:
 	@echo "==================== \033[1mHELP\033[0m ===================="
@@ -189,4 +203,5 @@ help:
 	@echo "  checkout-branch       - Checkout branch by name (use BRANCH=name or defaults to master)"
 	@echo "  install-docker        - Install Docker using scripts/install-docker-debian-trixie.sh"
 	@echo "                          Use USER_INTERACTIVE=1 for interactive root prompts"
+	@echo "  build-and-push-docker - Build and push Docker image using scripts/build-and-push-docker.sh"
 	@echo "  help                  - Show this help message"

@@ -25,12 +25,55 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Check if running as root
-check_root() {
+# Check sudo privileges and set sudo command
+SUDO_CMD=""
+NEED_ROOT_PASSWORD=false
+
+check_sudo_privileges() {
     if [[ $EUID -eq 0 ]]; then
         log_error "This script should not be run as root. Please run as a regular user."
-        log_info "The script will use sudo when needed."
+        log_info "The script will use sudo when needed or prompt for root access."
         exit 1
+    fi
+
+    # Check if user has sudo privileges
+    if sudo -n true 2>/dev/null; then
+        log_info "User has sudo privileges (passwordless). Using sudo for privileged operations."
+        SUDO_CMD="sudo"
+    elif groups "$USER" | grep -q '\bsudo\b\|wheel\b'; then
+        log_info "User is in sudo/wheel group. Will prompt for sudo password when needed."
+        SUDO_CMD="sudo"
+    else
+        log_warn "User does not appear to have sudo privileges."
+        log_warn "Checking if root password access is available..."
+        
+        # For non-interactive environments (like make), we need to handle this differently
+        if [[ ! -t 0 ]] || [[ -n "${MAKE_RESTARTS:-}" ]] || [[ -n "${MAKELEVEL:-}" ]]; then
+            log_error "Script is running in non-interactive mode (possibly from make)."
+            log_error "Root password prompts may not work properly."
+            log_error "Please run this script directly or ensure user has sudo privileges:"
+            log_error "  sudo usermod -aG sudo $USER"
+            log_error "Then log out and log back in, or run:"
+            log_error "  ./scripts/install-docker-debian-trixie.sh"
+            exit 1
+        fi
+        
+        log_warn "Will attempt to use 'su -c' for root operations."
+        log_warn "You will be prompted for the root password multiple times."
+        SUDO_CMD="su -c"
+        NEED_ROOT_PASSWORD=true
+        
+        # Test if we can switch to root with a visible prompt
+        echo -n "Testing root access... "
+        if su -c "true" </dev/tty; then
+            echo "Root access confirmed."
+        else
+            log_error "Cannot obtain root privileges via sudo or su."
+            log_error "Please ensure you have either:"
+            log_error "1. sudo privileges (add user to sudo group), or"
+            log_error "2. root password access"
+            exit 1
+        fi
     fi
 }
 
@@ -75,16 +118,29 @@ check_existing_docker() {
     fi
 }
 
+# Execute command with appropriate privileges
+run_as_root() {
+    if [[ "$SUDO_CMD" == "su -c" ]]; then
+        if [[ "$NEED_ROOT_PASSWORD" == true ]]; then
+            echo "Root privileges required for: $*"
+            echo "Please enter root password:"
+        fi
+        su -c "$*" </dev/tty
+    else
+        $SUDO_CMD "$@"
+    fi
+}
+
 # Update package index
 update_package_index() {
     log_info "Updating package index..."
-    sudo apt-get update
+    run_as_root apt-get update
 }
 
 # Install prerequisites
 install_prerequisites() {
     log_info "Installing prerequisites..."
-    sudo apt-get install -y \
+    run_as_root apt-get install -y \
         ca-certificates \
         curl \
         gnupg \
@@ -94,30 +150,47 @@ install_prerequisites() {
 # Add Docker's official GPG key
 add_docker_gpg_key() {
     log_info "Adding Docker's official GPG key..."
-    sudo install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    sudo chmod a+r /etc/apt/keyrings/docker.gpg
+    run_as_root install -m 0755 -d /etc/apt/keyrings
+    
+    if [[ "$SUDO_CMD" == "su -c" ]]; then
+        if [[ "$NEED_ROOT_PASSWORD" == true ]]; then
+            echo "Root privileges required for: adding Docker GPG key"
+            echo "Please enter root password:"
+        fi
+        curl -fsSL https://download.docker.com/linux/debian/gpg | su -c "gpg --dearmor -o /etc/apt/keyrings/docker.gpg" </dev/tty
+        run_as_root chmod a+r /etc/apt/keyrings/docker.gpg
+    else
+        curl -fsSL https://download.docker.com/linux/debian/gpg | $SUDO_CMD gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        run_as_root chmod a+r /etc/apt/keyrings/docker.gpg
+    fi
 }
 
 # Add Docker repository
 add_docker_repository() {
     log_info "Adding Docker repository..."
-    echo \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
-        $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-        sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    local repo_line="deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable"
+    
+    if [[ "$SUDO_CMD" == "su -c" ]]; then
+        if [[ "$NEED_ROOT_PASSWORD" == true ]]; then
+            echo "Root privileges required for: adding Docker repository"
+            echo "Please enter root password:"
+        fi
+        echo "$repo_line" | su -c "tee /etc/apt/sources.list.d/docker.list > /dev/null" </dev/tty
+    else
+        echo "$repo_line" | $SUDO_CMD tee /etc/apt/sources.list.d/docker.list > /dev/null
+    fi
 }
 
 # Update package index with Docker repo
 update_with_docker_repo() {
     log_info "Updating package index with Docker repository..."
-    sudo apt-get update
+    run_as_root apt-get update
 }
 
 # Install Docker Client only
 install_docker_client() {
     log_info "Installing Docker CLI client and plugins only..."
-    sudo apt-get install -y \
+    run_as_root apt-get install -y \
         docker-ce-cli \
         docker-buildx-plugin \
         docker-compose-plugin
@@ -174,13 +247,21 @@ print_post_install_info() {
     echo "  - Docker Buildx: docker buildx"
     echo
     log_warn "Remember: No local Docker daemon is installed. Set DOCKER_HOST for each session."
+    
+    # If user needed root password, suggest sudo setup for future
+    if [[ "$NEED_ROOT_PASSWORD" == true ]]; then
+        echo
+        log_info "Tip: To avoid root password prompts in the future:"
+        echo "  sudo usermod -aG sudo $USER"
+        echo "  # Then log out and log back in"
+    fi
 }
 
 # Main function
 main() {
     log_info "Starting Docker client installation for Debian Trixie..."
     
-    check_root
+    check_sudo_privileges
     check_debian_trixie
     check_existing_docker
     

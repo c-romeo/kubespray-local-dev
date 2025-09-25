@@ -69,18 +69,6 @@ check_sudo_privileges() {
         log_info "You will be prompted for the root password once, then commands will be batched."
         SUDO_CMD="su -c"
         NEED_ROOT_PASSWORD=true
-        
-        # Test if we can switch to root with a visible prompt
-        echo -n "Testing root access... "
-        if su -c "true" </dev/tty; then
-            echo "Root access confirmed."
-        else
-            log_error "Cannot obtain root privileges via sudo or su."
-            log_error "Please ensure you have either:"
-            log_error "1. sudo privileges (add user to sudo group), or"
-            log_error "2. root password access"
-            exit 1
-        fi
     fi
 }
 
@@ -179,18 +167,30 @@ execute_root_batch() {
         local batch_script=$(create_root_batch_script)
         
         log_info "Executing all root operations in a single session..."
-        log_warn "Please enter root password once:"
+        log_warn "Please enter root password:"
         
         if [[ "${USER_INTERACTIVE:-0}" == "1" ]] && ([[ ! -t 0 ]] || [[ -n "${MAKELEVEL:-}" ]]); then
             exec < /dev/tty
-            su -c "$batch_script"
+            if su -c "$batch_script"; then
+                # Cleanup on success
+                rm -f "$batch_script"
+                return 0
+            else
+                log_error "Root authentication failed. Cannot proceed with installation."
+                rm -f "$batch_script"
+                exit 1
+            fi
         else
-            su -c "$batch_script" </dev/tty
+            if su -c "$batch_script" </dev/tty; then
+                # Cleanup on success
+                rm -f "$batch_script"
+                return 0
+            else
+                log_error "Root authentication failed. Cannot proceed with installation."
+                rm -f "$batch_script"
+                exit 1
+            fi
         fi
-        
-        # Cleanup
-        rm -f "$batch_script"
-        return 0
     fi
     return 1
 }

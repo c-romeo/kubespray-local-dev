@@ -28,6 +28,7 @@ log_error() {
 # Check sudo privileges and set sudo command
 SUDO_CMD=""
 NEED_ROOT_PASSWORD=false
+ROOT_SHELL_PID=""
 
 check_sudo_privileges() {
     if [[ $EUID -eq 0 ]]; then
@@ -65,7 +66,7 @@ check_sudo_privileges() {
         fi
         
         log_warn "Will attempt to use 'su -c' for root operations."
-        log_warn "You will be prompted for the root password multiple times."
+        log_info "You will be prompted for the root password once, then commands will be batched."
         SUDO_CMD="su -c"
         NEED_ROOT_PASSWORD=true
         
@@ -124,7 +125,77 @@ check_existing_docker() {
     fi
 }
 
-# Execute command with appropriate privileges
+# Create a batch script for root operations
+create_root_batch_script() {
+    if [[ "$NEED_ROOT_PASSWORD" == true ]]; then
+        local batch_script="/tmp/docker_install_batch_$$"
+        cat > "$batch_script" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+
+echo "[ROOT] Starting Docker installation batch operations..."
+
+# Update package index
+echo "[ROOT] Updating package index..."
+apt-get update
+
+# Install prerequisites
+echo "[ROOT] Installing prerequisites..."
+apt-get install -y ca-certificates curl gnupg lsb-release
+
+# Create keyrings directory
+echo "[ROOT] Creating keyrings directory..."
+install -m 0755 -d /etc/apt/keyrings
+
+# Add Docker GPG key
+echo "[ROOT] Adding Docker GPG key..."
+curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+
+# Add Docker repository
+echo "[ROOT] Adding Docker repository..."
+ARCH=$(dpkg --print-architecture)
+CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+echo "deb [arch=$ARCH signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $CODENAME stable" > /etc/apt/sources.list.d/docker.list
+
+# Update package index with Docker repo
+echo "[ROOT] Updating package index with Docker repository..."  
+apt-get update
+
+# Install Docker client
+echo "[ROOT] Installing Docker CLI client and plugins..."
+apt-get install -y docker-ce-cli docker-buildx-plugin docker-compose-plugin
+
+echo "[ROOT] Docker installation batch operations completed successfully!"
+EOF
+        chmod +x "$batch_script"
+        echo "$batch_script"
+    fi
+}
+
+# Execute root batch script
+execute_root_batch() {
+    if [[ "$NEED_ROOT_PASSWORD" == true ]]; then
+        local batch_script=$(create_root_batch_script)
+        
+        log_info "Executing all root operations in a single session..."
+        log_warn "Please enter root password once:"
+        
+        if [[ "${USER_INTERACTIVE:-0}" == "1" ]] && ([[ ! -t 0 ]] || [[ -n "${MAKELEVEL:-}" ]]); then
+            exec < /dev/tty
+            su -c "$batch_script"
+        else
+            su -c "$batch_script" </dev/tty
+        fi
+        
+        # Cleanup
+        rm -f "$batch_script"
+        return 0
+    fi
+    return 1
+}
+
+# Execute command with appropriate privileges (fallback for individual commands)
 run_as_root() {
     if [[ "$SUDO_CMD" == "su -c" ]]; then
         if [[ "$NEED_ROOT_PASSWORD" == true ]]; then
@@ -288,12 +359,20 @@ main() {
     check_debian_trixie
     check_existing_docker
     
-    update_package_index
-    install_prerequisites
-    add_docker_gpg_key
-    add_docker_repository
-    update_with_docker_repo
-    install_docker_client
+    # Try to execute all root operations in a single batch to minimize password prompts
+    if execute_root_batch; then
+        log_info "All root operations completed in batch mode."
+    else
+        # Fallback to individual commands for sudo users
+        log_info "Executing individual installation steps..."
+        update_package_index
+        install_prerequisites
+        add_docker_gpg_key
+        add_docker_repository
+        update_with_docker_repo
+        install_docker_client
+    fi
+    
     configure_docker_client
     verify_installation
     print_post_install_info

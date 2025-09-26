@@ -1,3 +1,4 @@
 # Ignore cloned kubespray repository
 kubespray-fork/
+logs/
 .env

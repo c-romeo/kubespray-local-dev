@@ -56,9 +56,17 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 KUBESPRAY_FORK_DIR="$PROJECT_ROOT/kubespray-fork"
+LOGS_DIR="$PROJECT_ROOT/logs"
+
+# Create logs directory if it doesn't exist
+if [ ! -d "$LOGS_DIR" ]; then
+    mkdir -p "$LOGS_DIR"
+    print_status "Created logs directory: $LOGS_DIR"
+fi
 
 print_status "Project root: $PROJECT_ROOT"
 print_status "Kubespray fork directory: $KUBESPRAY_FORK_DIR"
+print_status "Logs directory: $LOGS_DIR"
 
 # Check if kubespray-fork directory exists
 if [ ! -d "$KUBESPRAY_FORK_DIR" ]; then
@@ -161,17 +169,42 @@ BASE_TAG="${DOCKER_REGISTRY}/${IMAGE_NAME}"
 VERSIONED_TAG="${BASE_TAG}:${TIMESTAMP}-${GIT_BRANCH_CLEAN}-${GIT_COMMIT}"
 LATEST_TAG="${BASE_TAG}:latest"
 
+# Set up log files
+BUILD_LOG_FILE="$LOGS_DIR/docker-build-${TIMESTAMP}.log"
+PUSH_LOG_FILE="$LOGS_DIR/docker-push-${TIMESTAMP}.log"
+
 print_status "Building Docker image..."
 print_status "Image will be tagged as:"
 print_status "  - $VERSIONED_TAG"
 print_status "  - $LATEST_TAG"
+print_status "Build logs will be saved to: $BUILD_LOG_FILE"
 
-# Build the Docker image
+# Build the Docker image with logging
 print_status "Building Docker image with versioned tag..."
-if docker build -t "$VERSIONED_TAG" .; then
+{
+    echo "=== Docker Build Started at $(date) ==="
+    echo "Command: docker build -t \"$VERSIONED_TAG\" ."
+    echo "Working directory: $(pwd)"
+    echo "Git branch: $GIT_BRANCH"
+    echo "Git commit: $GIT_COMMIT"
+    echo "================================="
+    echo ""
+} > "$BUILD_LOG_FILE"
+
+if docker build -t "$VERSIONED_TAG" . 2>&1 | tee -a "$BUILD_LOG_FILE"; then
+    {
+        echo ""
+        echo "=== Docker Build Completed Successfully at $(date) ==="
+    } >> "$BUILD_LOG_FILE"
     print_success "Docker image built successfully: $VERSIONED_TAG"
+    print_success "Build log saved to: $BUILD_LOG_FILE"
 else
+    {
+        echo ""
+        echo "=== Docker Build Failed at $(date) ==="
+    } >> "$BUILD_LOG_FILE"
     print_error "Failed to build Docker image"
+    print_error "Check build log for details: $BUILD_LOG_FILE"
     exit 1
 fi
 
@@ -193,27 +226,72 @@ else
     exit 1
 fi
 
+# Initialize push log
+{
+    echo "=== Docker Push Started at $(date) ==="
+    echo "Registry: $DOCKER_REGISTRY"
+    echo "Username: $DOCKER_USERNAME"
+    echo "Images to push:"
+    echo "  - $VERSIONED_TAG"
+    echo "  - $LATEST_TAG"
+    echo "================================="
+    echo ""
+} > "$PUSH_LOG_FILE"
+
 # Push the versioned image
 print_status "Pushing versioned image: $VERSIONED_TAG"
-if docker push "$VERSIONED_TAG"; then
+{
+    echo "--- Pushing versioned image at $(date) ---"
+    echo "Command: docker push \"$VERSIONED_TAG\""
+} >> "$PUSH_LOG_FILE"
+
+if docker push "$VERSIONED_TAG" 2>&1 | tee -a "$PUSH_LOG_FILE"; then
+    {
+        echo "✓ Versioned image pushed successfully at $(date)"
+        echo ""
+    } >> "$PUSH_LOG_FILE"
     print_success "Successfully pushed versioned image: $VERSIONED_TAG"
 else
+    {
+        echo "✗ Failed to push versioned image at $(date)"
+        echo ""
+    } >> "$PUSH_LOG_FILE"
     print_error "Failed to push versioned image"
+    print_error "Check push log for details: $PUSH_LOG_FILE"
     exit 1
 fi
 
 # Push the latest image
 print_status "Pushing latest image: $LATEST_TAG"
-if docker push "$LATEST_TAG"; then
+{
+    echo "--- Pushing latest image at $(date) ---"
+    echo "Command: docker push \"$LATEST_TAG\""
+} >> "$PUSH_LOG_FILE"
+
+if docker push "$LATEST_TAG" 2>&1 | tee -a "$PUSH_LOG_FILE"; then
+    {
+        echo "✓ Latest image pushed successfully at $(date)"
+        echo ""
+    } >> "$PUSH_LOG_FILE"
     print_success "Successfully pushed latest image: $LATEST_TAG"
 else
+    {
+        echo "✗ Failed to push latest image at $(date)"
+        echo ""
+    } >> "$PUSH_LOG_FILE"
     print_error "Failed to push latest image"
+    print_error "Check push log for details: $PUSH_LOG_FILE"
     exit 1
 fi
 
 # Logout from Docker registry
 print_status "Logging out from Docker registry..."
 docker logout "$DOCKER_REGISTRY" || print_warning "Logout failed, but continuing..."
+
+# Finalize push log
+{
+    echo "=== Docker Push Completed Successfully at $(date) ==="
+} >> "$PUSH_LOG_FILE"
 
 # Summary
 print_success "=== BUILD AND PUSH COMPLETED SUCCESSFULLY ==="
@@ -223,3 +301,6 @@ print_success "  - $LATEST_TAG"
 print_success "Build timestamp: $TIMESTAMP"
 print_success "Git branch: $GIT_BRANCH"
 print_success "Git commit: $GIT_COMMIT"
+print_success "Log files:"
+print_success "  - Build log: $BUILD_LOG_FILE"
+print_success "  - Push log: $PUSH_LOG_FILE"

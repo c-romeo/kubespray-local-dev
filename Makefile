@@ -157,6 +157,11 @@ checkout-branch:
 # Update local master from upstream/master and push to origin
 update-master-from-upstream:
 	@echo "==================== \033[1mUPDATE-MASTER-FROM-UPSTREAM\033[0m ===================="
+	@if [ "$(OS)" = "Windows_NT" ]; then
+		@echo "I'm not running on unix, should launch wsl..."
+		@echo "=== EXIT $$TARGET ==========================================="
+		exit 0
+	fi
 	@if [ -d "kubespray-fork" ]; then \
 		cd kubespray-fork && \
 		# Ensure upstream remote exists \

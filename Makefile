@@ -17,6 +17,7 @@ clone-kubespray:
 		echo "Cloning kubespray repository..."; \
 		git clone https://github.com/c-romeo/kubespray.git kubespray-fork; \
 		echo "Repository cloned successfully to kubespray-fork/"; \
+		cd kubespray-fork && git config pull.rebase true; \
 	else \
 		echo "kubespray-fork directory already exists, skipping clone."; \
 	fi

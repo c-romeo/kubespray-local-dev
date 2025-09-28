@@ -5,7 +5,7 @@ ifneq (,$(wildcard .env))
     export
 endif
 
-.PHONY: clone-kubespray clean list-remotes add-upstream list-origin-branches list-upstream-branches list-local-branches fetch-upstream fetch-origin checkout-branch install-docker build-and-push-docker help
+.PHONY: clone-kubespray clean list-remotes add-upstream list-origin-branches list-upstream-branches list-local-branches fetch-upstream fetch-origin checkout-branch update-master-from-upstream install-docker build-and-push-docker help
 
 # Default target
 all: clone-kubespray add-upstream list-remotes fetch-origin list-origin-branches fetch-upstream list-upstream-branches list-local-branches checkout-branch
@@ -154,6 +154,57 @@ checkout-branch:
 		echo "kubespray-fork directory does not exist. Run 'make clone-kubespray' first."; \
 	fi
 
+# Update local master from upstream/master and push to origin
+update-master-from-upstream:
+	@echo "==================== \033[1mUPDATE-MASTER-FROM-UPSTREAM\033[0m ===================="
+	@if [ -d "kubespray-fork" ]; then \
+		cd kubespray-fork && \
+		# Ensure upstream remote exists \
+		if git remote | grep -q "^upstream$$"; then \
+			echo "Upstream remote already exists."; \
+		else \
+			echo "Adding upstream remote..."; \
+			git remote add upstream https://github.com/kubernetes-sigs/kubespray.git; \
+			echo "Upstream remote added."; \
+		fi; \
+		echo "\033[1;32mFetching upstream...\033[0m"; \
+		git fetch upstream; \
+		echo "\033[1;32mFetching origin...\033[0m"; \
+		git fetch origin; \
+		# Ensure local master exists \
+		if git show-ref --verify --quiet refs/heads/master; then \
+			echo "Local branch master exists."; \
+		elif git ls-remote --heads origin master | grep -q master; then \
+			echo "Creating local master from origin/master..."; \
+			git checkout -b master origin/master; \
+		elif git ls-remote --heads upstream master | grep -q master; then \
+			echo "Creating local master from upstream/master..."; \
+			git checkout -b master upstream/master; \
+		else \
+			echo "\033[1;31mNo master branch found in origin or upstream.\033[0m"; \
+			exit 1; \
+		fi; \
+		echo "\033[1;32mChecking out master...\033[0m"; \
+		git checkout master; \
+		echo "\033[1;32mFast-forwarding master to upstream/master...\033[0m"; \
+		if git merge --ff-only upstream/master; then \
+			echo "Master fast-forwarded to upstream/master."; \
+		else \
+			echo "\033[1;33mFast-forward not possible; attempting rebase onto upstream/master...\033[0m"; \
+			if git rebase upstream/master; then \
+				echo "Rebase successful."; \
+			else \
+				echo "\033[1;31mRebase failed. Please resolve conflicts and continue the rebase manually.\033[0m"; \
+				exit 1; \
+			fi; \
+		fi; \
+		echo "\033[1;32mPushing updated master to origin...\033[0m"; \
+		git push origin master; \
+	else \
+		echo "kubespray-fork directory does not exist. Run 'make clone-kubespray' first."; \
+		exit 1; \
+	fi
+
 # Install Docker using the Debian Trixie installation script
 install-docker:
 	@echo "==================== \033[1mINSTALL-DOCKER\033[0m ===================="
@@ -202,6 +253,7 @@ help:
 	@echo "  fetch-upstream        - Fetch latest changes from upstream remote"
 	@echo "  fetch-origin          - Fetch latest changes from origin remote"
 	@echo "  checkout-branch       - Checkout branch by name (use BRANCH=name or defaults to master)"
+	@echo "  update-master-from-upstream - Update local master from upstream/master and push to origin"
 	@echo "  install-docker        - Install Docker using scripts/install-docker-debian-trixie.sh"
 	@echo "                          Use USER_INTERACTIVE=1 for interactive root prompts"
 	@echo "  build-and-push-docker - Build and push Docker image using scripts/build-and-push-docker.sh"
